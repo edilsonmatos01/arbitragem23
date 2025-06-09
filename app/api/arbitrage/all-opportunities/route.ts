@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getOpportunities } from '@/lib/opportunityCache';
+import { kv } from '@vercel/kv';
 // import ccxt, { Exchange } from 'ccxt'; // Comentado - não usado se a lógica for desabilitada
 // import { SUPPORTED_SYMBOLS } from '@/lib/constants'; // Comentado
 // import { findTradableSymbol, SupportedExchangeId } from '@/lib/exchangeUtils'; // Comentado
@@ -26,21 +26,26 @@ import { getOpportunities } from '@/lib/opportunityCache';
 // const ALL_EXCHANGES: SupportedExchangeId[] = ['binance', 'bybit', 'gateio', 'mexc']; // Comentado
 
 export async function GET(req: Request) {
-  console.log('[API /all-opportunities] Rota chamada. Buscando dados do cache...');
   try {
-    const { opportunities, lastUpdated } = getOpportunities();
+    // Busca a lista de oportunidades do Vercel KV
+    const opportunities = await kv.get('arbitrage-opportunities');
     
+    // Retorna a lista (ou uma lista vazia se não houver nada no KV)
     return NextResponse.json({
       result: {
-        list: opportunities,
+        list: opportunities || [],
       },
       retCode: 0,
       retMsg: 'OK',
-      lastUpdated: lastUpdated,
+      lastUpdated: new Date(), // A data de atualização agora pode ser controlada de forma mais granular se necessário
     });
 
   } catch (error) {
-    console.error('All-Opps - Erro ao buscar oportunidades do cache:', error instanceof Error ? error.message : String(error));
-    return NextResponse.json({ error: 'Erro ao buscar oportunidades do cache', details: error instanceof Error ? error.message : String(error) }, { status: 500 });
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('All-Opps - Erro ao buscar oportunidades do Vercel KV:', errorMessage);
+    return NextResponse.json({ 
+        error: 'Erro ao buscar oportunidades do banco de dados', 
+        details: errorMessage 
+    }, { status: 500 });
   }
 } 

@@ -1,126 +1,89 @@
 import { NextResponse } from 'next/server';
 import ccxt, { Ticker, Exchange } from 'ccxt';
 import { COMMON_BASE_ASSETS, COMMON_QUOTE_ASSET } from '@/lib/constants';
-import { setOpportunities } from '@/lib/opportunityCache';
+import { kv } from '@vercel/kv';
 
-// Força a rota a ser sempre dinâmica, evitando que seja executada no momento do build.
+// Força a rota a ser sempre dinâmica
 export const dynamic = 'force-dynamic';
 
-// Reconstruindo a lista de símbolos suportados
 const SUPPORTED_SYMBOLS = COMMON_BASE_ASSETS.map(base => `${base}/${COMMON_QUOTE_ASSET}`);
 
-// Definindo os tipos de exchanges suportadas
-type SupportedExchangeId = 'gateio' | 'mexc';
-const ALL_EXCHANGES: SupportedExchangeId[] = ['gateio', 'mexc'];
+const gateio = new ccxt.gateio({ enableRateLimit: true });
+const mexc = new ccxt.mexc({ enableRateLimit: true, options: { defaultType: 'swap' } }); // <-- Foco em Futuros (swap)
 
-// Função para obter uma instância da CCXT
-function getCcxtInstance(exchangeId: SupportedExchangeId): Exchange | null {
-  try {
-    const exchangeClass = ccxt[exchangeId];
-    return new exchangeClass({ enableRateLimit: true });
-  } catch (e) {
-    console.error(`Falha ao criar instância para ${exchangeId}`, e);
-    return null;
-  }
+// Função para buscar o ticker de uma exchange com tratamento de erro
+async function fetchTickerSafe(exchange: Exchange, symbol: string): Promise<Ticker | null> {
+    try {
+        // Assegura que os mercados estão carregados para validar o símbolo
+        if (!exchange.markets[symbol]) {
+            // console.warn(`Símbolo ${symbol} não encontrado na exchange ${exchange.id}`);
+            return null;
+        }
+        return await exchange.fetchTicker(symbol);
+    } catch (error) {
+        // Silenciosamente ignora erros de busca de ticker individual para não poluir logs
+        return null;
+    }
 }
 
-// Lógica principal para encontrar oportunidades de arbitragem
+// Lógica principal para encontrar oportunidades de arbitragem (Spot vs Futuros)
 async function findArbitrageOpportunities() {
+    console.log('Iniciando busca por oportunidades de arbitragem (Gate.io Spot vs MEXC Futures)...');
+
+    // Carrega os mercados para ambas as exchanges uma única vez
+    try {
+        await Promise.all([
+            gateio.loadMarkets(),
+            mexc.loadMarkets()
+        ]);
+    } catch (error) {
+        console.error("Falha ao carregar mercados, abortando a busca.", error);
+        return;
+    }
+
     const opportunities = [];
-    console.log('Iniciando busca por oportunidades de arbitragem...');
 
-    // 1. Cria instâncias e carrega os mercados de todas as exchanges UMA VEZ.
-    const exchanges = await Promise.all(
-        ALL_EXCHANGES.map(async (exchangeId) => {
-            const instance = getCcxtInstance(exchangeId);
-            if (instance) {
-                try {
-                    await instance.loadMarkets();
-                    return { id: exchangeId, instance };
-                } catch (e) {
-                    const errorMessage = e instanceof Error ? e.message : String(e);
-                    console.warn(`Falha ao carregar mercados para ${exchangeId}: ${errorMessage}`);
-                    return null;
-                }
-            }
-            return null;
-        })
-    );
-
-    const validExchanges = exchanges.filter((e): e is { id: SupportedExchangeId; instance: Exchange; } => e !== null);
-    
-    // 2. Itera sobre cada símbolo e busca os tickers nas exchanges já carregadas.
     for (const symbol of SUPPORTED_SYMBOLS) {
-        const tickers = await Promise.all(
-            validExchanges.map(async (exchange) => {
-                // Verifica se o símbolo existe na exchange (mercados já carregados)
-                if (exchange.instance.markets[symbol]) {
-                    try {
-                        const ticker = await exchange.instance.fetchTicker(symbol);
-                        return { exchange: exchange.id, ticker };
-                    } catch (error) {
-                        // Opcional: log para tickers individuais que falham
-                        // const errorMessage = error instanceof Error ? error.message : String(error);
-                        // console.warn(`Ticker falhou para ${symbol} em ${exchange.id}: ${errorMessage}`);
-                        return null;
-                    }
-                }
-                return null;
-            })
-        );
+        // Transforma o símbolo para o formato da MEXC Futures se necessário (ex: BTC/USDT -> BTC_USDT)
+        const mexcSymbol = mexc.market(symbol)?.id ?? symbol;
 
-        const validTickers = tickers.filter(
-            (t): t is { exchange: SupportedExchangeId; ticker: Ticker } =>
-                t !== null && t.ticker !== undefined && t.ticker.bid !== undefined && t.ticker.ask !== undefined
-        );
+        const [gateioTicker, mexcTicker] = await Promise.all([
+            fetchTickerSafe(gateio, symbol),
+            fetchTickerSafe(mexc, mexcSymbol)
+        ]);
 
-        if (validTickers.length > 1) {
-            for (let i = 0; i < validTickers.length; i++) {
-                for (let j = i + 1; j < validTickers.length; j++) {
-                    const exchangeA = validTickers[i];
-                    const exchangeB = validTickers[j];
+        // Verifica se temos preços de compra (ask) na Gate.io e venda (bid) na MEXC
+        if (gateioTicker?.ask && mexcTicker?.bid) {
+            const buyPrice = gateioTicker.ask; // Preço de compra na Gate.io (Spot)
+            const sellPrice = mexcTicker.bid; // Preço de venda na MEXC (Futures)
 
-                    // Oportunidade: Comprar na exchange A (preço ask) e vender na exchange B (preço bid)
-                    if (exchangeA.ticker.ask! < exchangeB.ticker.bid!) {
-                        const profit = ((exchangeB.ticker.bid! - exchangeA.ticker.ask!) / exchangeA.ticker.ask!) * 100;
-                        if (profit > 0.1) { // Limiar de lucro de 0.1% para ser considerado
-                            opportunities.push({
-                                symbol,
-                                buyAt: exchangeA.exchange,
-                                sellAt: exchangeB.exchange,
-                                buyPrice: exchangeA.ticker.ask,
-                                sellPrice: exchangeB.ticker.bid,
-                                profit: profit.toFixed(2) + '%'
-                            });
-                        }
-                    }
+            if (buyPrice > 0 && sellPrice > 0) {
+                const spread = ((sellPrice - buyPrice) / buyPrice) * 100;
 
-                    // Oportunidade: Comprar na exchange B (preço ask) e vender na exchange A (preço bid)
-                    if (exchangeB.ticker.ask! < exchangeA.ticker.bid!) {
-                        const profit = ((exchangeA.ticker.bid! - exchangeB.ticker.ask!) / exchangeB.ticker.ask!) * 100;
-                        if (profit > 0.1) {
-                            opportunities.push({
-                                symbol,
-                                buyAt: exchangeB.exchange,
-                                sellAt: exchangeA.exchange,
-                                buyPrice: exchangeB.ticker.ask,
-                                sellPrice: exchangeA.ticker.bid,
-                                profit: profit.toFixed(2) + '%'
-                            });
-                        }
-                    }
+                // Salva a oportunidade se o spread for positivo (lucro)
+                if (spread > 0) {
+                    opportunities.push({
+                        symbol,
+                        buyExchange: 'Gate.io (Spot)',
+                        sellExchange: 'MEXC (Futures)',
+                        buyPrice,
+                        sellPrice,
+                        spread: spread.toFixed(2) + '%'
+                    });
                 }
             }
         }
     }
 
-    console.log(`Busca finalizada. Oportunidades encontradas: ${opportunities.length}`);
-    // console.log(opportunities); // Opcional: pode remover o log para não poluir os logs
+    console.log(`Busca finalizada. ${opportunities.length} oportunidades encontradas.`);
     
-    // Salva as oportunidades no cache
-    setOpportunities(opportunities);
+    if (opportunities.length > 0) {
+        console.log(opportunities);
+    }
 
-    return opportunities;
+    // Salva as oportunidades encontradas no Vercel KV, substituindo as antigas
+    await kv.set('arbitrage-opportunities', opportunities);
+    console.log('Oportunidades salvas no Vercel KV.');
 }
 
 
@@ -128,12 +91,14 @@ export async function GET() {
   try {
     await findArbitrageOpportunities();
     return NextResponse.json({
-        message: 'Cron job executado com sucesso.',
+        message: 'Cron job (Spot/Futures) executado com sucesso.',
     }, { status: 200 });
   } catch (error) {
-    console.error('Erro ao executar o cron job de arbitragem:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('Erro ao executar o cron job de arbitragem (Spot/Futures):', errorMessage);
     return NextResponse.json({
         message: 'Erro no servidor ao executar o cron job.',
+        error: errorMessage
     }, { status: 500 });
   }
 } 
