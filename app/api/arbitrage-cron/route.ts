@@ -29,24 +29,43 @@ async function findArbitrageOpportunities() {
     const opportunities = [];
     console.log('Iniciando busca por oportunidades de arbitragem...');
 
-    for (const symbol of SUPPORTED_SYMBOLS) {
-        const tickers = await Promise.all(
-            ALL_EXCHANGES.map(async (exchangeId) => {
-                const exchange = getCcxtInstance(exchangeId);
-                if (!exchange) return null;
-
+    // 1. Cria instâncias e carrega os mercados de todas as exchanges UMA VEZ.
+    const exchanges = await Promise.all(
+        ALL_EXCHANGES.map(async (exchangeId) => {
+            const instance = getCcxtInstance(exchangeId);
+            if (instance) {
                 try {
-                    // Verifica se a exchange suporta o mercado antes de buscar o ticker
-                    await exchange.loadMarkets();
-                    if (exchange.markets[symbol]) {
-                        const ticker = await exchange.fetchTicker(symbol);
-                        return { exchange: exchangeId, ticker };
-                    }
-                    return null;
-                } catch (error) {
-                    // console.warn(`Não foi possível buscar o ticker para ${symbol} na ${exchangeId}:`, error.message);
+                    await instance.loadMarkets();
+                    return { id: exchangeId, instance };
+                } catch (e) {
+                    const errorMessage = e instanceof Error ? e.message : String(e);
+                    console.warn(`Falha ao carregar mercados para ${exchangeId}: ${errorMessage}`);
                     return null;
                 }
+            }
+            return null;
+        })
+    );
+
+    const validExchanges = exchanges.filter((e): e is { id: SupportedExchangeId; instance: Exchange; } => e !== null);
+    
+    // 2. Itera sobre cada símbolo e busca os tickers nas exchanges já carregadas.
+    for (const symbol of SUPPORTED_SYMBOLS) {
+        const tickers = await Promise.all(
+            validExchanges.map(async (exchange) => {
+                // Verifica se o símbolo existe na exchange (mercados já carregados)
+                if (exchange.instance.markets[symbol]) {
+                    try {
+                        const ticker = await exchange.instance.fetchTicker(symbol);
+                        return { exchange: exchange.id, ticker };
+                    } catch (error) {
+                        // Opcional: log para tickers individuais que falham
+                        // const errorMessage = error instanceof Error ? error.message : String(error);
+                        // console.warn(`Ticker falhou para ${symbol} em ${exchange.id}: ${errorMessage}`);
+                        return null;
+                    }
+                }
+                return null;
             })
         );
 
