@@ -14,14 +14,10 @@ const mexc = new ccxt.mexc({ enableRateLimit: true, options: { defaultType: 'swa
 // Função para buscar o ticker de uma exchange com tratamento de erro
 async function fetchTickerSafe(exchange: Exchange, symbol: string): Promise<Ticker | null> {
     try {
-        // Assegura que os mercados estão carregados para validar o símbolo
-        if (!exchange.markets[symbol]) {
-            // console.warn(`Símbolo ${symbol} não encontrado na exchange ${exchange.id}`);
-            return null;
-        }
+        // A função fetchTicker já usa o cache de mercados carregados, então não é preciso verificar de novo
         return await exchange.fetchTicker(symbol);
     } catch (error) {
-        // Silenciosamente ignora erros de busca de ticker individual para não poluir logs
+        // Ignora erros de busca de ticker para pares individuais (ex: timeout, par temporariamente indisponível)
         return null;
     }
 }
@@ -38,41 +34,43 @@ async function findArbitrageOpportunities() {
         ]);
     } catch (error) {
         console.error("Falha ao carregar mercados, abortando a busca.", error);
-        return;
+        throw error; // Propaga o erro para ser capturado e logado pelo handler da rota
     }
 
     const opportunities = [];
 
     for (const symbol of SUPPORTED_SYMBOLS) {
-        // Transforma o símbolo para o formato da MEXC Futures se necessário (ex: BTC/USDT -> BTC_USDT)
-        const mexcSymbol = mexc.market(symbol)?.id ?? symbol;
+        // VERIFICA se o símbolo existe em AMBAS as exchanges antes de prosseguir
+        if (gateio.markets[symbol] && mexc.markets[symbol]) {
+            
+            const [gateioTicker, mexcTicker] = await Promise.all([
+                fetchTickerSafe(gateio, symbol),
+                fetchTickerSafe(mexc, symbol) // Passamos o símbolo unificado, ccxt lida com a ID interna
+            ]);
 
-        const [gateioTicker, mexcTicker] = await Promise.all([
-            fetchTickerSafe(gateio, symbol),
-            fetchTickerSafe(mexc, mexcSymbol)
-        ]);
+            // Verifica se temos preços de compra (ask) na Gate.io e venda (bid) na MEXC
+            if (gateioTicker?.ask && mexcTicker?.bid) {
+                const buyPrice = gateioTicker.ask; // Preço de compra na Gate.io (Spot)
+                const sellPrice = mexcTicker.bid; // Preço de venda na MEXC (Futures)
 
-        // Verifica se temos preços de compra (ask) na Gate.io e venda (bid) na MEXC
-        if (gateioTicker?.ask && mexcTicker?.bid) {
-            const buyPrice = gateioTicker.ask; // Preço de compra na Gate.io (Spot)
-            const sellPrice = mexcTicker.bid; // Preço de venda na MEXC (Futures)
+                if (buyPrice > 0 && sellPrice > 0) {
+                    const spread = ((sellPrice - buyPrice) / buyPrice) * 100;
 
-            if (buyPrice > 0 && sellPrice > 0) {
-                const spread = ((sellPrice - buyPrice) / buyPrice) * 100;
-
-                // Salva a oportunidade se o spread for positivo (lucro)
-                if (spread > 0) {
-                    opportunities.push({
-                        symbol,
-                        buyExchange: 'Gate.io (Spot)',
-                        sellExchange: 'MEXC (Futures)',
-                        buyPrice,
-                        sellPrice,
-                        spread: spread.toFixed(2) + '%'
-                    });
+                    // Salva a oportunidade se o spread for positivo (lucro)
+                    if (spread > 0) {
+                        opportunities.push({
+                            symbol,
+                            buyExchange: 'Gate.io (Spot)',
+                            sellExchange: 'MEXC (Futures)',
+                            buyPrice,
+                            sellPrice,
+                            spread: spread.toFixed(2) + '%'
+                        });
+                    }
                 }
             }
         }
+        // Se o símbolo não existir em ambas as exchanges, ele é simplesmente ignorado.
     }
 
     console.log(`Busca finalizada. ${opportunities.length} oportunidades encontradas.`);
