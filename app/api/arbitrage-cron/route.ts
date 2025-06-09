@@ -3,6 +3,9 @@ import ccxt, { Ticker, Exchange } from 'ccxt';
 import { COMMON_BASE_ASSETS, COMMON_QUOTE_ASSET } from '@/lib/constants';
 import { setOpportunities } from '@/lib/opportunityCache';
 
+// Força a rota a ser sempre dinâmica, evitando que seja executada no momento do build.
+export const dynamic = 'force-dynamic';
+
 // Reconstruindo a lista de símbolos suportados
 const SUPPORTED_SYMBOLS = COMMON_BASE_ASSETS.map(base => `${base}/${COMMON_QUOTE_ASSET}`);
 
