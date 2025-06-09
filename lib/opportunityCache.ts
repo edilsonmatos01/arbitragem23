@@ -7,11 +7,13 @@ let opportunitiesCache: any[] = [];
 let lastUpdated: Date | null = null;
 
 export const setOpportunities = (opportunities: any[]) => {
+  console.log(`[Cache] Gravando ${opportunities.length} oportunidades no cache.`);
   opportunitiesCache = opportunities;
   lastUpdated = new Date();
 };
 
 export const getOpportunities = () => {
+  console.log(`[Cache] Lendo ${opportunitiesCache.length} oportunidades do cache. Última atualização: ${lastUpdated}`);
   return {
     opportunities: opportunitiesCache,
     lastUpdated: lastUpdated,

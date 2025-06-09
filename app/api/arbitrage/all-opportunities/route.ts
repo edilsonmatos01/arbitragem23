@@ -26,6 +26,7 @@ import { getOpportunities } from '@/lib/opportunityCache';
 // const ALL_EXCHANGES: SupportedExchangeId[] = ['binance', 'bybit', 'gateio', 'mexc']; // Comentado
 
 export async function GET(req: Request) {
+  console.log('[API /all-opportunities] Rota chamada. Buscando dados do cache...');
   try {
     const { opportunities, lastUpdated } = getOpportunities();
     
