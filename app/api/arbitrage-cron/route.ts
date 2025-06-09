@@ -10,8 +10,8 @@ export const dynamic = 'force-dynamic';
 const SUPPORTED_SYMBOLS = COMMON_BASE_ASSETS.map(base => `${base}/${COMMON_QUOTE_ASSET}`);
 
 // Definindo os tipos de exchanges suportadas
-type SupportedExchangeId = 'binance' | 'bybit' | 'gateio' | 'mexc';
-const ALL_EXCHANGES: SupportedExchangeId[] = ['binance', 'bybit', 'gateio', 'mexc'];
+type SupportedExchangeId = 'gateio' | 'mexc';
+const ALL_EXCHANGES: SupportedExchangeId[] = ['gateio', 'mexc'];
 
 // Função para obter uma instância da CCXT
 function getCcxtInstance(exchangeId: SupportedExchangeId): Exchange | null {
