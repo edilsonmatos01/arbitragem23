@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useState, useMemo, useEffect, useRef } from "react";
-import { Play, Pause, RefreshCw, Clock, ZapOff } from 'lucide-react';
+import { Play, Pause, RefreshCw, Clock } from 'lucide-react';
 
 interface Opportunity {
   symbol: string;
@@ -39,6 +39,8 @@ export default function ArbitrageTable() {
   const fetchAndRankOpportunities = useCallback(async () => {
     if (document.hidden) return;
 
+    if (!isPolling) setIsLoading(true);
+
     try {
       const response = await fetch('/api/arbitrage/all-opportunities');
       if (!response.ok) throw new Error('Falha ao buscar dados da API');
@@ -67,9 +69,9 @@ export default function ArbitrageTable() {
       setError(e.message || 'Não foi possível carregar os dados.');
       setIsPolling(false);
     } finally {
-        if(isLoading) setIsLoading(false);
+        setIsLoading(false);
     }
-  }, [amount, isLoading]);
+  }, [amount, isPolling]);
 
   useEffect(() => {
     if (isPolling) {
@@ -83,10 +85,9 @@ export default function ArbitrageTable() {
   }, [isPolling, fetchAndRankOpportunities]);
 
   const handleStart = () => {
-    setIsLoading(true);
     setError(null);
     setRankedOpportunities([]);
-    fetchAndRankOpportunities();
+    fetchAndRankOpportunities(); 
     setIsPolling(true);
   };
 
@@ -97,21 +98,6 @@ export default function ArbitrageTable() {
   const filteredAndSortedOpportunities = useMemo(() => {
     return rankedOpportunities.filter(o => o.spread >= minSpread);
   }, [rankedOpportunities, minSpread]);
-
-  const renderInitialState = () => (
-    <div className="text-center p-8 bg-gray-800 rounded-lg">
-        <h2 className="text-xl mb-4">Monitoramento de Oportunidades</h2>
-        <p className="text-gray-400 mb-6">Clique no botão abaixo para iniciar a busca por oportunidades de arbitragem em tempo real.</p>
-        <button onClick={handleStart} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-lg flex items-center gap-2 mx-auto">
-            <Play className="h-5 w-5" />
-            Buscar Oportunidades
-        </button>
-    </div>
-  );
-
-  if (!isPolling && !isLoading && rankedOpportunities.length === 0) {
-    return renderInitialState();
-  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -132,11 +118,11 @@ export default function ArbitrageTable() {
             </div>
             <div className="flex justify-end">
             {!isPolling ? (
-                <button onClick={handleStart} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2">
+                <button onClick={handleStart} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2 w-full justify-center md:w-auto">
                     <Play className="h-5 w-5" /> Iniciar Busca
                 </button>
             ) : (
-                <button onClick={handleStop} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2">
+                <button onClick={handleStop} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2 w-full justify-center md:w-auto">
                     <Pause className="h-5 w-5" /> Pausar Busca
                 </button>
             )}
@@ -195,10 +181,10 @@ export default function ArbitrageTable() {
                       {isPolling ? (
                           <>
                             <Clock className="h-8 w-8 mx-auto mb-2" />
-                            Nenhuma oportunidade com o spread mínimo encontrado. Monitorando...
+                            <span>Nenhuma oportunidade encontrada para os filtros selecionados. Monitorando...</span>
                           </>
                       ) : (
-                          "Busca pausada. Clique em 'Iniciar Busca' para começar."
+                          <span>Clique em "Iniciar Busca" para começar a procurar oportunidades.</span>
                       )}
                     </td>
                 </tr>
