@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getOpportunities } from '@/lib/opportunityCache';
 // import ccxt, { Exchange } from 'ccxt'; // Comentado - não usado se a lógica for desabilitada
 // import { SUPPORTED_SYMBOLS } from '@/lib/constants'; // Comentado
 // import { findTradableSymbol, SupportedExchangeId } from '@/lib/exchangeUtils'; // Comentado
@@ -26,21 +27,19 @@ import { NextResponse } from 'next/server';
 
 export async function GET(req: Request) {
   try {
-    // LÓGICA DE BUSCA DE OPORTUNIDADES REMOVIDA/DESABILITADA
-    // console.log("API /api/arbitrage/all-opportunities chamada, mas a lógica de busca está desabilitada.");
+    const { opportunities, lastUpdated } = getOpportunities();
     
-    // Retorna imediatamente uma lista vazia
     return NextResponse.json({
       result: {
-        list: [], // Lista de oportunidades vazia
+        list: opportunities,
       },
       retCode: 0,
-      retMsg: 'OK (Lógica de busca desabilitada)',
+      retMsg: 'OK',
+      lastUpdated: lastUpdated,
     });
 
   } catch (error) {
-    // Este catch ainda é útil para erros inesperados no setup básico da rota, se houver.
-    console.error('All-Opps - Erro geral (lógica desabilitada):', error instanceof Error ? error.message : String(error));
-    return NextResponse.json({ error: 'Erro geral na rota (lógica de busca desabilitada)', details: error instanceof Error ? error.message : String(error) }, { status: 500 });
+    console.error('All-Opps - Erro ao buscar oportunidades do cache:', error instanceof Error ? error.message : String(error));
+    return NextResponse.json({ error: 'Erro ao buscar oportunidades do cache', details: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
 } 
