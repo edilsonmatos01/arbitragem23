@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import ccxt, { Ticker, Exchange } from 'ccxt';
 import { COMMON_BASE_ASSETS, COMMON_QUOTE_ASSET } from '@/lib/constants';
-import { kv } from '@vercel/kv';
+import { createClient } from 'redis';
 
 // Força a rota a ser sempre dinâmica
 export const dynamic = 'force-dynamic';
@@ -79,9 +79,14 @@ async function findArbitrageOpportunities() {
         console.log(opportunities);
     }
 
-    // Salva as oportunidades encontradas no Vercel KV, substituindo as antigas
-    await kv.set('arbitrage-opportunities', opportunities);
-    console.log('Oportunidades salvas no Vercel KV.');
+    // Salva as oportunidades encontradas no Redis
+    const redis = createClient({ url: process.env.KV_REDIS_URL });
+    await redis.connect();
+    // Converte o array para string JSON antes de salvar
+    await redis.set('arbitrage-opportunities', JSON.stringify(opportunities));
+    await redis.disconnect();
+    
+    console.log('Oportunidades salvas no Redis.');
 }
 
 

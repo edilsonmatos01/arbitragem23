@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { kv } from '@vercel/kv';
+import { createClient } from 'redis';
 // import ccxt, { Exchange } from 'ccxt'; // Comentado - não usado se a lógica for desabilitada
 // import { SUPPORTED_SYMBOLS } from '@/lib/constants'; // Comentado
 // import { findTradableSymbol, SupportedExchangeId } from '@/lib/exchangeUtils'; // Comentado
@@ -27,17 +27,23 @@ import { kv } from '@vercel/kv';
 
 export async function GET(req: Request) {
   try {
-    // Busca a lista de oportunidades do Vercel KV
-    const opportunities = await kv.get('arbitrage-opportunities');
+    const redis = createClient({ url: process.env.KV_REDIS_URL });
+    await redis.connect();
+
+    // Busca a string JSON do Redis
+    const opportunitiesData = await redis.get('arbitrage-opportunities');
+    await redis.disconnect();
     
-    // Retorna a lista (ou uma lista vazia se não houver nada no KV)
+    // Converte a string JSON de volta para um array (ou retorna um array vazio se não houver nada)
+    const opportunities = opportunitiesData ? JSON.parse(opportunitiesData) : [];
+
     return NextResponse.json({
       result: {
-        list: opportunities || [],
+        list: opportunities,
       },
       retCode: 0,
       retMsg: 'OK',
-      lastUpdated: new Date(), // A data de atualização agora pode ser controlada de forma mais granular se necessário
+      lastUpdated: new Date(), 
     });
 
   } catch (error) {
