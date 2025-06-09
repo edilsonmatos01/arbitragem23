@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import ccxt, { Ticker, Exchange } from 'ccxt';
 import { COMMON_BASE_ASSETS, COMMON_QUOTE_ASSET } from '@/lib/constants';
 import { createClient } from 'redis';
+import Pusher from 'pusher';
 
 // Força a rota a ser sempre dinâmica
 export const dynamic = 'force-dynamic';
@@ -78,6 +79,19 @@ async function findArbitrageOpportunities() {
     if (opportunities.length > 0) {
         console.log(opportunities);
     }
+
+    // Inicializa o Pusher
+    const pusher = new Pusher({
+        appId: process.env.PUSHER_APP_ID!,
+        key: process.env.NEXT_PUBLIC_PUSHER_KEY!,
+        secret: process.env.PUSHER_SECRET!,
+        cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,
+        useTLS: true
+    });
+
+    // Envia o evento para o Pusher
+    await pusher.trigger('arbitrage-channel', 'new-opportunities', opportunities);
+    console.log('Evento de oportunidades enviado para o Pusher.');
 
     // Salva as oportunidades encontradas no Redis
     const redis = createClient({ url: process.env.KV_REDIS_URL });

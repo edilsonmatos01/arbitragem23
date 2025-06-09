@@ -1,6 +1,7 @@
 "use client";
-import { useCallback, useState, useMemo } from "react";
-import { Play, RefreshCw, AlertTriangle, CheckCircle2, Clock } from 'lucide-react';
+import { useCallback, useState, useMemo, useEffect } from "react";
+import { RefreshCw, AlertTriangle, CheckCircle2, Clock } from 'lucide-react';
+import { useArbitragePusher } from './useArbitragePusher';
 
 // Interface para as oportunidades formatadas para a tabela
 interface Opportunity {
@@ -24,68 +25,77 @@ interface OpportunityFromAPI {
 }
 
 export default function ArbitrageTable() {
-  const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [rankedOpportunities, setRankedOpportunities] = useState<Opportunity[]>([]);
   const [minSpread, setMinSpread] = useState(0.1);
   const [amount, setAmount] = useState(100);
   
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string|null>(null);
-  const [successMessage, setSuccessMessage] = useState<string|null>(null);
+  const [isConnecting, setIsConnecting] = useState(true);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  
+  // O hook agora nos fornece o lote mais recente de oportunidades do backend
+  const latestOpportunitiesFromPusher = useArbitragePusher();
 
-  const fetchOpportunities = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    setOpportunities([]); // Limpa as oportunidades antigas antes de buscar novas
-
-    try {
-      const response = await fetch('/api/arbitrage/all-opportunities');
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Falha ao buscar dados da API');
-      }
-      const data = await response.json();
-      
-      const apiOpportunities: OpportunityFromAPI[] = data.result.list || [];
-
-      const formattedOpportunities: Opportunity[] = apiOpportunities.map((opp) => {
-        const spreadValue = parseFloat(opp.spread); // Converte "0.44%" para 0.44
-        return {
-          symbol: opp.symbol,
-          compraExchange: opp.buyExchange,
-          vendaExchange: opp.sellExchange,
-          compraPreco: opp.buyPrice,
-          vendaPreco: opp.sellPrice,
-          spread: spreadValue,
-          lucroEstimado: ((spreadValue / 100) * amount).toFixed(2),
-        };
-      });
-
-      setOpportunities(formattedOpportunities);
-
-      if(formattedOpportunities.length === 0) {
-        setSuccessMessage("Nenhuma oportunidade encontrada com os critérios atuais.");
-        setTimeout(() => setSuccessMessage(null), 5000);
-      }
-
-    } catch (e: any) {
-      setError(e.message);
-      console.error(e);
-      setTimeout(() => setError(null), 5000);
-    } finally {
-      setIsLoading(false);
+  // Lógica de Ranking Dinâmico
+  useEffect(() => {
+    // A primeira vez que o Pusher se conecta, o estado inicial é um array vazio.
+    // Assim que o primeiro lote de dados chega, marcamos a conexão como estabelecida.
+    if (isConnecting && latestOpportunitiesFromPusher.length > 0) {
+      setIsConnecting(false);
     }
-  }, [amount]);
+    
+    // Processa o novo lote de oportunidades recebido
+    const newFormattedOpportunities: Opportunity[] = latestOpportunitiesFromPusher.map((opp) => {
+      const spreadValue = parseFloat(opp.spread);
+      return {
+        symbol: opp.symbol,
+        compraExchange: opp.buyExchange,
+        vendaExchange: opp.sellExchange,
+        compraPreco: opp.buyPrice,
+        vendaPreco: opp.sellPrice,
+        spread: spreadValue,
+        lucroEstimado: ((spreadValue / 100) * amount).toFixed(2),
+      };
+    });
+
+    // Atualiza o ranking com os novos dados
+    setRankedOpportunities(prevRanked => {
+      // Cria um mapa para fundir as oportunidades existentes com as novas
+      const opportunitiesMap = new Map<string, Opportunity>();
+      
+      // Adiciona as oportunidades já ranqueadas ao mapa
+      for (const opp of prevRanked) {
+        opportunitiesMap.set(opp.symbol, opp);
+      }
+      
+      // Adiciona as novas oportunidades, substituindo as antigas se o spread for melhor
+      for (const newOpp of newFormattedOpportunities) {
+        const existing = opportunitiesMap.get(newOpp.symbol);
+        if (!existing || newOpp.spread > existing.spread) {
+          opportunitiesMap.set(newOpp.symbol, newOpp);
+        }
+      }
+
+      // Converte o mapa de volta para um array, ordena e pega as 8 melhores
+      const finalOpportunities = Array.from(opportunitiesMap.values())
+        .sort((a, b) => b.spread - a.spread) // Ordena por maior spread
+        .slice(0, 8); // Limita ao top 8
+      
+      return finalOpportunities;
+    });
+
+    if (latestOpportunitiesFromPusher.length > 0) {
+      setLastUpdate(new Date());
+    }
+
+  }, [latestOpportunitiesFromPusher, amount, isConnecting]);
+
 
   const filteredOpportunities = useMemo(() => {
-    return opportunities
-      .filter(o => o.spread >= minSpread)
-      .sort((a, b) => b.spread - a.spread);
-  }, [opportunities, minSpread]);
-
+    return rankedOpportunities.filter(o => o.spread >= minSpread);
+  }, [rankedOpportunities, minSpread]);
+  
   const handleExecuteArbitrage = (opportunity: Opportunity) => {
-    setSuccessMessage(`Sucesso! Arbitragem para ${opportunity.symbol} (Spread: ${opportunity.spread.toFixed(4)}%) executada.`);
     console.log("Executar arbitragem:", opportunity, "Valor aportado:", amount);
-    setTimeout(() => setSuccessMessage(null), 5000);
   };
   
   const formatPrice = (price: number) => {
@@ -101,6 +111,7 @@ export default function ArbitrageTable() {
     if (spreadValue > 0.1) return 'text-green-300';
     return 'text-gray-300';
   };
+
 
   return (
     <div className="flex flex-col gap-4">
@@ -128,26 +139,28 @@ export default function ArbitrageTable() {
           </div>
         </div>
 
-        <button
-          onClick={fetchOpportunities}
-          disabled={isLoading}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2 disabled:bg-indigo-400 disabled:cursor-not-allowed"
-        >
-          {isLoading ? <RefreshCw className="animate-spin h-5 w-5" /> : <Play className="h-5 w-5" />}
-          {isLoading ? 'Buscando...' : 'Buscar Oportunidades'}
-        </button>
+        <div className="flex items-center gap-2 text-sm text-gray-400">
+          {isConnecting ? (
+            <>
+              <RefreshCw className="animate-spin h-4 w-4" />
+              <span>Conectando ao feed em tempo real...</span>
+            </>
+          ) : (
+            <>
+              <CheckCircle2 className="h-4 w-4 text-green-500" />
+              <span>Conectado! Última atualização: {lastUpdate?.toLocaleTimeString()}</span>
+            </>
+          )}
+        </div>
       </div>
-      
-      {/* Mensagens de Status */}
-      {error && <div className="bg-red-900 border border-red-700 text-red-200 px-4 py-3 rounded-lg flex items-center gap-2"><AlertTriangle className="h-5 w-5" /><span>Erro: {error}</span></div>}
-      {successMessage && <div className="bg-green-900 border border-green-700 text-green-200 px-4 py-3 rounded-lg flex items-center gap-2"><CheckCircle2 className="h-5 w-5" /><span>{successMessage}</span></div>}
 
       {/* Tabela de Oportunidades Encontradas */}
       <div className="bg-gray-800 p-4 rounded-lg shadow-md">
-        <h2 className="text-xl font-semibold mb-4 text-white">Oportunidades Encontradas</h2>
+        <h2 className="text-xl font-semibold mb-4 text-white">Ranking de Oportunidades (Top 8)</h2>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-700">
-            <thead className="bg-gray-700">
+             {/* O thead da tabela permanece o mesmo */}
+             <thead className="bg-gray-700">
               <tr>
                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Par</th>
                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Comprar Em</th>
@@ -160,18 +173,18 @@ export default function ArbitrageTable() {
               </tr>
             </thead>
             <tbody className="bg-gray-800 divide-y divide-gray-700">
-              {isLoading && (
+              {isConnecting && (
                 <tr>
                   <td colSpan={8} className="text-center py-8 text-gray-400">
                     <div className="flex justify-center items-center gap-2">
                       <RefreshCw className="animate-spin h-5 w-5" />
-                      <span>Buscando dados...</span>
+                      <span>Aguardando o primeiro lote de dados do servidor...</span>
                     </div>
                   </td>
                 </tr>
               )}
-              {!isLoading && filteredOpportunities.length > 0 && filteredOpportunities.map((opp, index) => (
-                <tr key={index} className="hover:bg-gray-700 transition-colors">
+              {!isConnecting && filteredOpportunities.length > 0 && filteredOpportunities.map((opp, index) => (
+                <tr key={`${opp.symbol}-${index}`} className="hover:bg-gray-700 transition-colors">
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{opp.symbol}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{opp.compraExchange}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{opp.vendaExchange}</td>
@@ -189,12 +202,12 @@ export default function ArbitrageTable() {
                   </td>
                 </tr>
               ))}
-              {!isLoading && filteredOpportunities.length === 0 && (
+              {!isConnecting && filteredOpportunities.length === 0 && (
                  <tr>
                     <td colSpan={8} className="text-center py-8 text-gray-500">
                       <div className="flex flex-col items-center gap-2">
                         <Clock className="h-8 w-8" />
-                        <span>Nenhuma oportunidade encontrada. Clique em "Buscar Oportunidades".</span>
+                        <span>Nenhuma oportunidade com o spread mínimo foi encontrada no último ciclo. Aguardando...</span>
                       </div>
                     </td>
                   </tr>
