@@ -4,7 +4,14 @@ import { MexcConnector } from '@/src/mexc-connector';
 import { MarketPrices, ArbitrageOpportunity } from '@/src/types';
 import { pusher } from '@/src/app/api/pusher/route';
 
-const trackedPairs = ["BTC/USDT", "ETH/USDT", "SOL/USDT"];
+const trackedPairs = [
+  "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT", "AVAX/USDT", "DOT/USDT", "TRX/USDT", "LTC/USDT",
+  "MATIC/USDT", "LINK/USDT", "ATOM/USDT", "NEAR/USDT", "FIL/USDT", "AAVE/USDT", "UNI/USDT", "FTM/USDT", "INJ/USDT", "RNDR/USDT",
+  "ARB/USDT", "OP/USDT", "SUI/USDT", "LDO/USDT", "DYDX/USDT", "GRT/USDT", "1INCH/USDT",
+  "APE/USDT", "GMT/USDT", "FLOW/USDT", "PEPE/USDT", "FLOKI/USDT", "BONK/USDT",
+  "DOGE/USDT", "SHIB/USDT", "WIF/USDT", "TURBO/USDT", "1000SATS/USDT",
+  "TON/USDT", "APT/USDT", "SEI/USDT"
+];
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
