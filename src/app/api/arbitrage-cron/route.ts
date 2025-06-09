@@ -3,15 +3,7 @@ import { GateIoConnector } from '@/src/gateio-connector';
 import { MexcConnector } from '@/src/mexc-connector';
 import { MarketPrices, ArbitrageOpportunity } from '@/src/types';
 import { pusher } from '@/src/app/api/pusher/route';
-
-const trackedPairs = [
-  "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT", "AVAX/USDT", "DOT/USDT", "TRX/USDT", "LTC/USDT",
-  "MATIC/USDT", "LINK/USDT", "ATOM/USDT", "NEAR/USDT", "FIL/USDT", "AAVE/USDT", "UNI/USDT", "FTM/USDT", "INJ/USDT", "RNDR/USDT",
-  "ARB/USDT", "OP/USDT", "SUI/USDT", "LDO/USDT", "DYDX/USDT", "GRT/USDT", "1INCH/USDT",
-  "APE/USDT", "GMT/USDT", "FLOW/USDT", "PEPE/USDT", "FLOKI/USDT", "BONK/USDT",
-  "DOGE/USDT", "SHIB/USDT", "WIF/USDT", "TURBO/USDT", "1000SATS/USDT",
-  "TON/USDT", "APT/USDT", "SEI/USDT"
-];
+import ccxt from 'ccxt';
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -19,6 +11,16 @@ function sleep(ms: number) {
 
 export async function GET(request: Request) {
   let marketPrices: MarketPrices = {};
+
+  // Busca dinâmica dos pares disponíveis nas duas exchanges
+  const gateio = new ccxt.gateio();
+  const mexc = new ccxt.mexc();
+  await gateio.loadMarkets();
+  await mexc.loadMarkets();
+  const gateioPairs = Object.keys(gateio.markets).filter(p => p.endsWith('/USDT'));
+  const mexcPairs = Object.keys(mexc.markets).filter(p => p.endsWith('/USDT'));
+  // Apenas pares que existem em ambas as exchanges
+  const trackedPairs = gateioPairs.filter(pair => mexcPairs.includes(pair));
 
   // Inicializa os conectores
   const gateIoSpotConnector = new GateIoConnector('GATEIO_SPOT', marketPrices);
